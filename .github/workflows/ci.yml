@@ -1,0 +1,29 @@
+name: checks
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # pwnagotchi is not installable here, so nothing is imported: the checks
+      # work on the syntax tree, which is also what makes them safe to run on a
+      # pull request from a fork.
+      - name: Plugin checks
+        run: python .github/check_plugins.py
+
+      - name: Compile
+        run: python -m compileall -q .
