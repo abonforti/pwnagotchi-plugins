@@ -12,7 +12,7 @@ Raspberry Pi Zero 2 W with a Waveshare 2.13" v3 display, 250x122, and a PiSugar 
 | [`age_caps.py`](age_caps.py) | Fork of AlienMajik's `age`: uppercase labels, `EXP` instead of `Next Age`, three upstream fixes |
 | [`memtemp_caps.py`](memtemp_caps.py) | Fork of the bundled `memtemp`: uppercase headers, heavier fonts |
 | [`pisugar_custom_button.py`](pisugar_custom_button.py) | Long press on the PiSugar custom button switches between AUTO and PASV; single and double are reserved |
-| [`pasv_mode.py`](pasv_mode.py) | A third state between AUTO and MANU: keeps listening, stops deauthenticating, associating and advertising |
+| [`pasv_mode.py`](pasv_mode.py) | A third state between AUTO and MANU: keeps listening, stops deauthenticating, associating and advertising, and survives a restart |
 | [`ui_tweaks.py`](ui_tweaks.py) | Moves and restyles built-in elements, and adds a connectivity indicator with the pwngrid inbox counter |
 
 Each plugin documents its own options, its reasoning and its caveats in `__help__`, which is what

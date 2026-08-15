@@ -4,6 +4,7 @@ import threading
 
 import pwnagotchi
 import pwnagotchi.plugins as plugins
+import pwnagotchi.ui.faces as faces
 
 # pwngrid-peer listens here. Advertising cannot be stopped through the config,
 # see the note in __help__.
@@ -12,7 +13,7 @@ MESH_URL = 'http://127.0.0.1:8666/api/v1/mesh/%s'
 
 class PasvMode(plugins.Plugin):
     __author__ = 'abonforti'
-    __version__ = '1.1.0'
+    __version__ = '1.2.0'
     __license__ = 'GPL3'
     __description__ = (
         'A passive mode that keeps listening but stops transmitting: no deauthentication, no '
@@ -51,6 +52,7 @@ class PasvMode(plugins.Plugin):
       mesh = true         # also stop advertising, not just attacking
       mesh_timeout = 3
       persist = true      # survive a restart, see below
+      face = "(≖‿‿≖)"     # held while passive, "" to leave the face alone
       confd = "/etc/pwnagotchi/conf.d/"   # defaults to main.confd
 
     ## Controlling it
@@ -69,6 +71,18 @@ class PasvMode(plugins.Plugin):
     Events are queued per plugin and dispatched on their own threads, so nothing is returned and
     the caller does not block. That is the point: a button plugin should not know how any of this
     works.
+
+    ## The face
+
+    A passive unit stops interacting, so the epoch counter of inactive rounds climbs and the mood
+    machinery walks it through bored and then sad. The face ends up telling a story that has
+    nothing to do with what is happening: it is not sad, it is doing what it was told.
+
+    While passive the face is therefore held at the configured one, reasserted on every update
+    because the mood machinery rewrites it. Set face to an empty string to leave it alone.
+
+    Keep to glyphs DejaVuSansMono-Bold actually has. Several of the stock faces contain katakana,
+    hangul or halfwidth forms it does not cover, and those render as empty boxes.
 
     ## Surviving a restart
 
@@ -112,7 +126,9 @@ class PasvMode(plugins.Plugin):
         self.mesh = True
         self.mesh_timeout = 3
         self.persist = True
+        self.face = '(≖‿‿≖)'
         self.dropin = None
+        self._restore_face = False
         self.passive = False
         self._agent = None
         self._lock = threading.Lock()
@@ -142,6 +158,9 @@ class PasvMode(plugins.Plugin):
 
             if self.persist:
                 result['dropin'] = self._write_dropin(wanted)
+
+            if self.passive and not wanted:
+                self._restore_face = True
 
             self.passive = wanted
             result['passive'] = wanted
@@ -208,6 +227,7 @@ class PasvMode(plugins.Plugin):
         self.mesh = bool(self.options.get('mesh', True))
         self.mesh_timeout = max(1, int(self.options.get('mesh_timeout', 3)))
         self.persist = bool(self.options.get('persist', True))
+        self.face = self.options.get('face', self.face) or None
 
         confd = self.options.get('confd')
         if not confd:
@@ -235,7 +255,21 @@ class PasvMode(plugins.Plugin):
         if self._agent is None:
             self._agent = getattr(ui, '_agent', None)
 
-        if not self.show_on_display or 'mode' not in ui._state._state:
+        if not self.show_on_display:
+            return
+
+        # The face is rewritten by whatever mood the automata is in, so it has to
+        # be reasserted on every update rather than set once.
+        if self.face:
+            if self.passive:
+                ui.set('face', self.face)
+            elif self._restore_face:
+                # Nothing would repaint it until the next mood change, which can
+                # be a whole epoch away, so hand back a neutral one right now.
+                self._restore_face = False
+                ui.set('face', getattr(faces, 'AWAKE', '(◕‿‿◕)'))
+
+        if 'mode' not in ui._state._state:
             return
 
         # view.py writes 'mode' from exactly one place, on_manual_mode, so in auto
