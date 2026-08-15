@@ -8,6 +8,7 @@ Raspberry Pi Zero 2 W with a Waveshare 2.13" v3 display and a PiSugar 3.
 | [`pisugar_power_button.py`](pisugar_power_button.py) | Turns the PiSugar 3 power button into a graceful shutdown button |
 | [`memtemp_caps.py`](memtemp_caps.py) | Cosmetic fork of the bundled `memtemp`: uppercase headers, heavier fonts |
 | [`age_caps.py`](age_caps.py) | Cosmetic fork of AlienMajik's `age`: uppercase labels, `EXP` instead of `Next Age` |
+| [`ui_tweaks.py`](ui_tweaks.py) | Rewrites the prompt character after the name and drops the seconds from `UP` |
 
 ## Installing
 
