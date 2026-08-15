@@ -543,7 +543,7 @@ class PiSugarServer:
 
 class PiSugar(plugins.Plugin):
     __author__ = "jayofelony, fork by abonforti"
-    __version__ = "1.4-ext"
+    __version__ = "1.5-ext"
     __license__ = "GPL3"
     __description__ = (
         "A plugin that will add a voltage indicator for the PiSugar batteries. "
@@ -597,6 +597,21 @@ class PiSugar(plugins.Plugin):
       temp_x_coord = 155
       temp_y_coord = 20
       temp_label = "TMP"
+
+    Both get a trailing '!' when they leave their safe band:
+
+      voltage_min = 3.40       # the level curve puts 3.1V at 0% and 4.10V at 100%
+      voltage_max = 4.25       # above this a single cell is being overcharged
+      temp_max = 60            # see below
+
+    Note that 0x04 is the *chip* temperature, not the battery's, even though the stock plugin
+    labels it 'Battery Temperature' in its web page. The datasheet calls it 'Chip temperature,
+    -40-85 degrees Celsius', and the vendor documents 50-60C while charging at 2A and up to 80C at
+    3A, so 60 marks the point where things are no longer routine while leaving margin to the 85C
+    limit.
+
+    The marker is suppressed until the device reports ready, otherwise the 0.00V placeholder used
+    before the first read would show up as an alarm.
 
     Second change, forced by the rename: upstream reads its options from a hardcoded section name,
 
@@ -652,6 +667,9 @@ class PiSugar(plugins.Plugin):
         self.full_level = 99  # percentage at which CHG becomes EXT
         self.voltage_label = "VOL"
         self.temp_label = "TMP"
+        self.voltage_min = 3.40
+        self.voltage_max = 4.25
+        self.temp_max = 60
         self.extra_positions = {}  # optional standalone voltage/temp elements
 
     def safe_get(self, func, default=None):
@@ -678,6 +696,9 @@ class PiSugar(plugins.Plugin):
         self.full_level = int(cfg.get('full_level', 99))
         self.voltage_label = cfg.get('voltage_label', 'VOL')
         self.temp_label = cfg.get('temp_label', 'TMP')
+        self.voltage_min = float(cfg.get('voltage_min', 3.40))
+        self.voltage_max = float(cfg.get('voltage_max', 4.25))
+        self.temp_max = int(cfg.get('temp_max', 60))
 
         self.extra_positions = {}
         for key, prefix in (('psvoltage', 'voltage'), ('pstemp', 'temp')):
@@ -938,10 +959,14 @@ class PiSugar(plugins.Plugin):
         battery_plugged = self.safe_get(
             self.ps.get_battery_power_plugged, default=False)
 
+        # The warning marker is suppressed until the device is ready, otherwise the
+        # placeholder 0.00V would read as an alarm for the first few seconds.
         if 'psvoltage' in ui._state._state:
-            ui.set('psvoltage', f"{voltage:.2f}V")
+            alarm = self.ready and not (self.voltage_min <= voltage <= self.voltage_max)
+            ui.set('psvoltage', f"{voltage:.2f}V{'!' if alarm else ''}")
         if 'pstemp' in ui._state._state:
-            ui.set('pstemp', f"{temp}C")
+            alarm = self.ready and temp >= self.temp_max
+            ui.set('pstemp', f"{temp}C{'!' if alarm else ''}")
 
         # The MCU has no 'charge complete' bit, only 'external power present', so
         # fullness is inferred from the level. The threshold is not 100 because the
