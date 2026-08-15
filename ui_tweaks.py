@@ -6,10 +6,13 @@ import pwnagotchi.ui.fonts as fonts
 from pwnagotchi.ui.components import Text
 from pwnagotchi.ui.view import BLACK
 
+# DejaVu Sans Mono advances 1233 units per em out of 2048, so 6 pixels at size 10.
+CHAR_WIDTH = 6.02
+
 
 class UiTweaks(plugins.Plugin):
     __author__ = 'abonforti'
-    __version__ = '1.6.0'
+    __version__ = '1.7.0'
     __license__ = 'GPL3'
     __description__ = (
         'Small cosmetic rewrites of built-in UI elements: the prompt character after the name, '
@@ -44,6 +47,8 @@ class UiTweaks(plugins.Plugin):
       net_interval = 60
       net_timeout = 3
       net_font = "Bold"
+      net_mail = true          # append the pwngrid inbox counter while online
+      net_mail_font = "Medium"
       friend_font = "Medium"   # match the PWND value instead of the smaller default
       friend_preview = "<bars> peer 3 (12)"   # layout aid, remove afterwards
 
@@ -93,6 +98,30 @@ class UiTweaks(plugins.Plugin):
     seventeen character peer line grows from 82 to 102 pixels, and a long peer name can reach the
     mode indicator at 225.
 
+    net_mail appends the pwngrid inbox counter after the state, as (3) or (3*) when at least one
+    message is unread. It is a second element because a Text carries one font, and its x is
+    recomputed from the width of the state word, which is two characters for UP and four for DOWN.
+
+    The counter is only drawn while online, for two reasons. It comes from pwngrid, which cannot
+    refresh it without internet, so showing it next to DOWN would put a stale number beside a
+    label announcing that it cannot be updated. And it keeps the pair inside the row: UP(12*) ends
+    42 pixels along, DOWN(12*) would need 54 and run into whatever comes next.
+
+    The bundled grid plugin already computes both numbers, but its event is useless here because
+    it only fires when something is unread:
+
+        if self.unread_messages:
+            plugins.on('unread_inbox', self.unread_messages)
+
+    Nothing announces the count dropping back to zero, so the asterisk would never clear. The
+    inbox is read directly instead, from the local pwngrid-peer daemon rather than opwngrid:
+
+        # pwngrid-peer is running on port 8666
+        API_ADDRESS = "http://127.0.0.1:8666/api/v1"
+
+    grid.inbox() would reach the same place but through grid.call(), whose timeouts are 30 and 60
+    seconds; this uses net_timeout instead.
+
     The connectivity indicator is a bare Text, not a LabeledValue: 'UP' and 'DOWN' already say
     what they mean and a label would need room this row does not have. It only exists when both
     net coordinates are configured, and only then is the polling thread started.
@@ -132,7 +161,11 @@ class UiTweaks(plugins.Plugin):
         self.net_url = 'http://cp.cloudflare.com/generate_204'
         self.net_interval = 60
         self.net_timeout = 3
+        self.net_mail = False
+        self.net_mail_font = 'Medium'
+        self.net_inbox_url = 'http://127.0.0.1:8666/api/v1/inbox'
         self._online = False
+        self._mail = ''
         self._stop = threading.Event()
         self._thread = None
 
@@ -165,6 +198,9 @@ class UiTweaks(plugins.Plugin):
         self.net_url = self.options.get('net_url', self.net_url)
         self.net_interval = max(10, int(self.options.get('net_interval', 60)))
         self.net_timeout = max(1, int(self.options.get('net_timeout', 3)))
+        self.net_mail = bool(self.options.get('net_mail', False))
+        self.net_mail_font = self.options.get('net_mail_font', self.net_mail_font)
+        self.net_inbox_url = self.options.get('net_inbox_url', self.net_inbox_url)
 
         logging.info(
             "[ui_tweaks] loaded, name suffix %r, uptime seconds %s, uptime x %s, status %s",
@@ -188,6 +224,8 @@ class UiTweaks(plugins.Plugin):
         if self.net_position is not None:
             with ui._lock:
                 ui.remove_element('netstatus')
+                if self.net_mail:
+                    ui.remove_element('netmail')
 
     def on_ui_setup(self, ui):
         if self.uptime_x is not None:
@@ -211,6 +249,17 @@ class UiTweaks(plugins.Plugin):
                     font=getattr(fonts, self.net_font, fonts.Bold),
                 ),
             )
+
+            if self.net_mail:
+                ui.add_element(
+                    'netmail',
+                    Text(
+                        color=BLACK,
+                        value='',
+                        position=self.net_position,
+                        font=getattr(fonts, self.net_mail_font, fonts.Medium),
+                    ),
+                )
 
     def _restyle(self, ui, key, font_name):
         font = getattr(fonts, font_name, None)
@@ -244,7 +293,19 @@ class UiTweaks(plugins.Plugin):
         if not self.uptime_seconds:
             self._trim_uptime(ui)
         if self.net_position is not None and 'netstatus' in ui._state._state:
-            ui.set('netstatus', self.net_up_text if self._online else self.net_down_text)
+            state = self.net_up_text if self._online else self.net_down_text
+            ui.set('netstatus', state)
+
+            if self.net_mail and 'netmail' in ui._state._state:
+                # The counter is only shown while online: it comes from pwngrid,
+                # which cannot refresh it without internet, so pairing it with a
+                # DOWN state would put a stale number next to a label saying so.
+                # It also keeps the pair narrow enough for the row.
+                ui.set('netmail', self._mail if self._online else '')
+                ui._state._state['netmail'].xy = (
+                    self.net_position[0] + int(len(state) * CHAR_WIDTH),
+                    self.net_position[1],
+                )
         if self.friend_preview:
             # Layout aid only. The peer line is normally empty until another
             # pwnagotchi is in range, which makes its placement impossible to
@@ -284,7 +345,26 @@ class UiTweaks(plugins.Plugin):
                 logging.info("[ui_tweaks] connectivity %s", "up" if online else "down")
                 self._online = online
 
+            if online and self.net_mail:
+                self._mail = self._read_inbox()
+
             self._stop.wait(self.net_interval)
+
+    def _read_inbox(self):
+        """
+        Ask the local pwngrid-peer daemon, not opwngrid directly. grid.inbox() would
+        do the same but through grid.call(), whose timeouts are 30 and 60 seconds.
+        """
+        try:
+            import requests
+            messages = requests.get(self.net_inbox_url, timeout=self.net_timeout)
+            messages = messages.json().get('messages') or []
+        except Exception as e:
+            logging.debug("[ui_tweaks] inbox read failed: %s", e)
+            return ''
+
+        unread = any(m.get('seen_at') is None for m in messages)
+        return "(%d%s)" % (len(messages), '*' if unread else '')
 
     def _trim_uptime(self, ui):
         uptime = ui.get('uptime')
