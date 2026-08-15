@@ -35,29 +35,31 @@ class PiSugarCustomButton(plugins.Plugin):
 
         1 => single, 2 => double, 3 => long
 
-    A gesture is turned into a plugin event and nothing else:
+    The long press switches between AUTO and PASV, by emitting a plugin event rather than doing
+    the work here:
 
-        plugins.on(action)
+        plugins.on(self.event)
 
-    which reaches any plugin implementing on_<action>. This plugin therefore knows nothing about
-    what it triggers, and adding a behaviour later means writing the plugin that handles the
-    event, not touching this one.
+    which reaches any plugin implementing on_<event>, pasv_mode.py in this case. Nothing about
+    what passive mode means lives in this file: this one reads a button.
+
+    It is inert in manual mode. A manual pwnagotchi transmits nothing to begin with, so there is
+    nothing to switch off, and the display would be announcing a state that means nothing there.
+    The press is logged and ignored.
+
+    The single and double branches exist and are reached, but carry no logic yet. A short press is
+    easy to trigger by accident in a pocket, and what deserves to sit there has not been decided.
 
     Configuration:
 
       [main.plugins.pisugar_custom_button]
       enabled = true
       poll_interval = 2
-      single = "none"
-      double = "none"
-      long = "pasv_toggle"
+      event = "pasv_toggle"
 
-    Only the long press is bound at the moment, to the passive mode in pasv_mode.py. The other two
-    are wired but left unbound on purpose: a short press is easy to trigger by accident in a
-    pocket, and the actions worth having there have not been decided.
-
-    Events are dispatched on the target plugin's own thread and return nothing, so a binding
-    cannot report success here. Look at the log of whatever handles it.
+    Events are dispatched on the target plugin's own thread and return nothing, so nothing can be
+    reported back here. Look at the log of whatever handles it: pasv_mode prints what actually
+    changed, including the HTTP status of the call that stops the mesh.
 
     Runs alongside pisugar_power_button, which owns the power button. Both lift the write
     protection on 0x0B around a write, so in principle a tap and a shutdown landing in the same
@@ -68,8 +70,9 @@ class PiSugarCustomButton(plugins.Plugin):
     def __init__(self):
         self.options = dict()
         self.poll_interval = 2
-        self.bindings = {}
+        self.event = 'pasv_toggle'
         self._bus = None
+        self._agent = None
         self._stop = threading.Event()
         self._thread = None
 
@@ -94,30 +97,39 @@ class PiSugarCustomButton(plugins.Plugin):
     # --- dispatch ----------------------------------------------------------
 
     def _dispatch(self, tap):
-        action = self.bindings.get(tap, 'none')
-        if action == 'none':
-            logging.debug("[pisugar_custom_button] %s tap, nothing bound", tap)
+        if tap == 'single':
+            # Reserved. Nothing bound yet.
+            logging.debug("[pisugar_custom_button] single tap, nothing bound")
+
+        elif tap == 'double':
+            # Reserved. Nothing bound yet.
+            logging.debug("[pisugar_custom_button] double tap, nothing bound")
+
+        elif tap == 'long':
+            self._toggle_passive()
+
+    def _toggle_passive(self):
+        """
+        Switch between AUTO and PASV. Deliberately inert in manual mode: a manual
+        pwnagotchi transmits nothing to begin with, so there is nothing to switch
+        off and the display would be claiming a state that means nothing there.
+        """
+        mode = getattr(self._agent, 'mode', None)
+        if mode != 'auto':
+            logging.info("[pisugar_custom_button] long press ignored, mode is %s", mode)
             return
 
-        logging.info("[pisugar_custom_button] %s tap -> %s", tap, action)
+        logging.info("[pisugar_custom_button] long press -> %s", self.event)
         try:
-            plugins.on(action)
+            plugins.on(self.event)
         except Exception as e:
-            logging.error("[pisugar_custom_button] %s failed: %s", action, e)
+            logging.error("[pisugar_custom_button] %s failed: %s", self.event, e)
 
     # --- lifecycle ---------------------------------------------------------
 
     def on_loaded(self):
         self.poll_interval = max(1, int(self.options.get('poll_interval', 2)))
-
-        defaults = {'single': 'none', 'double': 'none', 'long': 'pasv_toggle'}
-        for tap, default in defaults.items():
-            self.bindings[tap] = str(self.options.get(tap, default)).strip() or 'none'
-
-        bound = {k: v for k, v in self.bindings.items() if v != 'none'}
-        if not bound:
-            logging.info("[pisugar_custom_button] loaded, nothing bound")
-            return
+        self.event = str(self.options.get('event', 'pasv_toggle'))
 
         try:
             from smbus2 import SMBus
@@ -126,12 +138,22 @@ class PiSugarCustomButton(plugins.Plugin):
             logging.error("[pisugar_custom_button] cannot open i2c bus %d: %s", I2C_BUS, e)
             return
 
-        logging.info("[pisugar_custom_button] loaded, poll every %ds, bound: %s",
-                     self.poll_interval, bound)
+        logging.info("[pisugar_custom_button] loaded, poll every %ds, long press sends %r",
+                     self.poll_interval, self.event)
 
         self._stop.clear()
         self._thread = threading.Thread(target=self._poll, daemon=True)
         self._thread.start()
+
+    def on_ui_update(self, ui):
+        # The agent carries the current mode, and on_ready never fires in manual
+        # mode because that event comes from automata.py, which is only reached
+        # through agent.start().
+        if self._agent is None:
+            self._agent = getattr(ui, '_agent', None)
+
+    def on_ready(self, agent):
+        self._agent = agent
 
     def on_unload(self, ui):
         self._stop.set()
