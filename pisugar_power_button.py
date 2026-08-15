@@ -24,7 +24,7 @@ OUTPUT_SWITCH = 1 << 5
 
 class PiSugarPowerButton(plugins.Plugin):
     __author__ = 'abonforti'
-    __version__ = '1.0.0'
+    __version__ = '1.0.1'
     __license__ = 'GPL3'
     __description__ = (
         'Turns the PiSugar 3 power button into a graceful shutdown button. A long press no longer '
@@ -158,8 +158,21 @@ class PiSugarPowerButton(plugins.Plugin):
             self.poll_interval, self.shutdown_delay,
         )
 
+        self._arm()
+
     def on_ready(self, agent):
-        if self._bus is None:
+        # Arming already happened in on_loaded. This only covers being enabled at
+        # runtime from the web config, where 'ready' is emitted right after
+        # 'loaded' and the guard in _arm() makes the second call a no-op.
+        self._arm()
+
+    def _arm(self):
+        """
+        Arm the button and start polling. Deliberately not tied to on_ready:
+        that event is emitted from automata.py, which is only reached through
+        agent.start() in auto mode, so in manual mode it never fires at all.
+        """
+        if self._bus is None or self.ready:
             return
 
         try:
@@ -175,6 +188,7 @@ class PiSugarPowerButton(plugins.Plugin):
         logging.info("[PiSugarPowerButton] power button armed for graceful shutdown")
 
     def on_unload(self, ui):
+        self.ready = False
         self._stop.set()
         if self._thread is not None:
             self._thread.join(timeout=self.poll_interval + 1)
