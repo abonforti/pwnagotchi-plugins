@@ -543,7 +543,7 @@ class PiSugarServer:
 
 class PiSugar(plugins.Plugin):
     __author__ = "jayofelony, fork by abonforti"
-    __version__ = "1.3-ext"
+    __version__ = "1.4-ext"
     __license__ = "GPL3"
     __description__ = (
         "A plugin that will add a voltage indicator for the PiSugar batteries. "
@@ -586,6 +586,17 @@ class PiSugar(plugins.Plugin):
       lowpower_shutdown_level = 10
       shutdown_delay = 45
       max_charge_voltage_protection = false
+
+    Voltage and temperature can also be given their own elements. The stock 'bat' element shows
+    one metric at a time, rotating or fixed, so seeing the voltage costs you the percentage. These
+    are only created when both coordinates are configured, so the default behaviour is unchanged:
+
+      voltage_x_coord = 82
+      voltage_y_coord = 20
+      voltage_label = "VOL"
+      temp_x_coord = 155
+      temp_y_coord = 20
+      temp_label = "TMP"
 
     Second change, forced by the rename: upstream reads its options from a hardcoded section name,
 
@@ -639,6 +650,9 @@ class PiSugar(plugins.Plugin):
         self.rotation_enabled = True  # default: rotation enabled
         self.default_display = "voltage"  # default display option
         self.full_level = 99  # percentage at which CHG becomes EXT
+        self.voltage_label = "VOL"
+        self.temp_label = "TMP"
+        self.extra_positions = {}  # optional standalone voltage/temp elements
 
     def safe_get(self, func, default=None):
         """
@@ -662,6 +676,15 @@ class PiSugar(plugins.Plugin):
         self.rotation_enabled = cfg.get('rotation', True)
         self.default_display = cfg.get('default_display', 'voltage').lower()
         self.full_level = int(cfg.get('full_level', 99))
+        self.voltage_label = cfg.get('voltage_label', 'VOL')
+        self.temp_label = cfg.get('temp_label', 'TMP')
+
+        self.extra_positions = {}
+        for key, prefix in (('psvoltage', 'voltage'), ('pstemp', 'temp')):
+            x = cfg.get(f'{prefix}_x_coord')
+            y = cfg.get(f'{prefix}_y_coord')
+            if x is not None and y is not None:
+                self.extra_positions[key] = (int(x), int(y))
 
         valid_displays = ['voltage', 'percentage', 'temp']
         if self.default_display not in valid_displays:
@@ -863,9 +886,33 @@ class PiSugar(plugins.Plugin):
             ),
         )
 
+        # Optional standalone readouts. The stock element shows one metric at a
+        # time, either rotating or fixed, so voltage and temperature are only
+        # visible at the cost of the percentage. These are only created when a
+        # position is configured, so nothing changes unless asked for.
+        for key, label in (('psvoltage', self.voltage_label),
+                           ('pstemp', self.temp_label)):
+            pos = self.extra_positions.get(key)
+            if pos is None:
+                continue
+            ui.add_element(
+                key,
+                LabeledValue(
+                    color=BLACK,
+                    label=label,
+                    value="-",
+                    position=pos,
+                    label_font=fonts.Bold,
+                    text_font=fonts.Medium,
+                ),
+            )
+
     def on_unload(self, ui):
         with ui._lock:
             ui.remove_element("bat")
+            for key in ('psvoltage', 'pstemp'):
+                if key in self.extra_positions:
+                    ui.remove_element(key)
 
     def on_ui_update(self, ui):
         # Make sure "bat" is in the UI state (guard to prevent KeyError)
@@ -890,6 +937,11 @@ class PiSugar(plugins.Plugin):
         # Check if battery is plugged in
         battery_plugged = self.safe_get(
             self.ps.get_battery_power_plugged, default=False)
+
+        if 'psvoltage' in ui._state._state:
+            ui.set('psvoltage', f"{voltage:.2f}V")
+        if 'pstemp' in ui._state._state:
+            ui.set('pstemp', f"{temp}C")
 
         # The MCU has no 'charge complete' bit, only 'external power present', so
         # fullness is inferred from the level. The threshold is not 100 because the

@@ -5,7 +5,7 @@ import pwnagotchi.plugins as plugins
 
 class UiTweaks(plugins.Plugin):
     __author__ = 'abonforti'
-    __version__ = '1.2.0'
+    __version__ = '1.3.0'
     __license__ = 'GPL3'
     __description__ = (
         'Small cosmetic rewrites of built-in UI elements: the prompt character after the name, '
@@ -30,6 +30,8 @@ class UiTweaks(plugins.Plugin):
       uptime_x_coord = 203     # moves the UP element, omit to leave it alone
       status_y_coord = 38      # moves the status bubble down, omit to leave it alone
       status_x_coord = 130     # moves it right, off the face
+      friend_x_coord = 95      # moves the closest peer line into the bottom bar
+      friend_y_coord = 110
 
     Dropping the seconds is worth it when ui.fps is 0: the uptime is in the view's ignore list, so
     it is only repainted when something else changes and the seconds are stale anyway.
@@ -59,6 +61,18 @@ class UiTweaks(plugins.Plugin):
     further trades a wider gap for a couple of clipped pixels on full width lines, more with the
     oblique font, whose last glyph leans right.
 
+    friend_x_coord and friend_y_coord move the closest peer line, which the layout puts at (0, 92)
+    right under the face, into the empty stretch of the bottom bar. Note that the element is
+    'friend_name' and it carries the whole string, signal bars included, because 'friend_face' is
+    commented out in view.py and friend_name inherits its position:
+
+        # 'friend_face': Text(value=None, position=self._layout['friend_face'], ...),
+        'friend_name': Text(value=None, position=self._layout['friend_face'], font=fonts.BoldSmall, ...),
+
+    The bottom bar holds only PWND on the left and the mode on the right at x 225, so roughly
+    x 95 to 225 is free. At BoldSmall a character is about 4.8 pixels wide, which leaves room for
+    some 27 characters, enough for four signal bars, a peer name and its two counters.
+
     The blinking cursor from ui.cursor is preserved: it is stripped before the suffix is replaced
     and put back afterwards.
     """
@@ -70,6 +84,8 @@ class UiTweaks(plugins.Plugin):
         self.uptime_x = None
         self.status_y = None
         self.status_x = None
+        self.friend_x = None
+        self.friend_y = None
 
     def on_loaded(self):
         self.name_suffix = str(self.options.get('name_suffix', '_'))
@@ -84,6 +100,11 @@ class UiTweaks(plugins.Plugin):
         x = self.options.get('status_x_coord')
         self.status_x = int(x) if x is not None else None
 
+        x = self.options.get('friend_x_coord')
+        self.friend_x = int(x) if x is not None else None
+        y = self.options.get('friend_y_coord')
+        self.friend_y = int(y) if y is not None else None
+
         logging.info(
             "[ui_tweaks] loaded, name suffix %r, uptime seconds %s, uptime x %s, status %s",
             self.name_suffix, self.uptime_seconds, self.uptime_x,
@@ -95,6 +116,8 @@ class UiTweaks(plugins.Plugin):
             self._move(ui, 'uptime', x=self.uptime_x)
         if self.status_x is not None or self.status_y is not None:
             self._move(ui, 'status', x=self.status_x, y=self.status_y)
+        if self.friend_x is not None or self.friend_y is not None:
+            self._move(ui, 'friend_name', x=self.friend_x, y=self.friend_y)
 
     def _move(self, ui, key, x=None, y=None):
         # There is no public accessor for a widget, only for its value, so reach
