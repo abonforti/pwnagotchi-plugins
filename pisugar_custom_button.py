@@ -20,7 +20,7 @@ TAPS = {1: 'single', 2: 'double', 3: 'long'}
 
 class PiSugarCustomButton(plugins.Plugin):
     __author__ = 'abonforti'
-    __version__ = '1.0.0'
+    __version__ = '1.0.1'
     __license__ = 'GPL3'
     __description__ = (
         'Reads the PiSugar 3 custom button and emits a pwnagotchi plugin event for each gesture.'
@@ -34,6 +34,10 @@ class PiSugarCustomButton(plugins.Plugin):
     second poll never misses one. The encoding matches pisugar-core:
 
         1 => single, 2 => double, 3 => long
+
+    The same latch means a press survives a restart, and a press from days ago would be acted on
+    at the next load as if it had just happened. The register is therefore emptied once on load,
+    before the polling thread starts, and what was thrown away is logged.
 
     The long press switches between AUTO and PASV, by emitting a plugin event rather than doing
     the work here:
@@ -137,6 +141,16 @@ class PiSugarCustomButton(plugins.Plugin):
         except Exception as e:
             logging.error("[pisugar_custom_button] cannot open i2c bus %d: %s", I2C_BUS, e)
             return
+
+        # 0x08 is a latch: it holds the last gesture until something clears it, so
+        # a press from a previous run, possibly days old, would fire an action on
+        # the first poll. Throw away whatever is in there before starting.
+        try:
+            stale = self._read_tap()
+            if stale:
+                logging.info("[pisugar_custom_button] discarded a stale %s tap", stale)
+        except OSError as e:
+            logging.warning("[pisugar_custom_button] cannot clear the tap register: %s", e)
 
         logging.info("[pisugar_custom_button] loaded, poll every %ds, long press sends %r",
                      self.poll_interval, self.event)
