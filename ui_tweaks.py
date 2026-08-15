@@ -5,7 +5,7 @@ import pwnagotchi.plugins as plugins
 
 class UiTweaks(plugins.Plugin):
     __author__ = 'abonforti'
-    __version__ = '1.3.0'
+    __version__ = '1.4.0'
     __license__ = 'GPL3'
     __description__ = (
         'Small cosmetic rewrites of built-in UI elements: the prompt character after the name, '
@@ -32,6 +32,7 @@ class UiTweaks(plugins.Plugin):
       status_x_coord = 130     # moves it right, off the face
       friend_x_coord = 95      # moves the closest peer line into the bottom bar
       friend_y_coord = 110
+      friend_preview = "<bars> peer 3 (12)"   # layout aid, remove afterwards
 
     Dropping the seconds is worth it when ui.fps is 0: the uptime is in the view's ignore list, so
     it is only repainted when something else changes and the seconds are stale anyway.
@@ -86,6 +87,7 @@ class UiTweaks(plugins.Plugin):
         self.status_x = None
         self.friend_x = None
         self.friend_y = None
+        self.friend_preview = None
 
     def on_loaded(self):
         self.name_suffix = str(self.options.get('name_suffix', '_'))
@@ -104,6 +106,7 @@ class UiTweaks(plugins.Plugin):
         self.friend_x = int(x) if x is not None else None
         y = self.options.get('friend_y_coord')
         self.friend_y = int(y) if y is not None else None
+        self.friend_preview = self.options.get('friend_preview') or None
 
         logging.info(
             "[ui_tweaks] loaded, name suffix %r, uptime seconds %s, uptime x %s, status %s",
@@ -138,6 +141,11 @@ class UiTweaks(plugins.Plugin):
         self._fix_name(ui)
         if not self.uptime_seconds:
             self._trim_uptime(ui)
+        if self.friend_preview:
+            # Layout aid only. The peer line is normally empty until another
+            # pwnagotchi is in range, which makes its placement impossible to
+            # check with a single unit.
+            ui.set('friend_name', self.friend_preview)
 
     def _fix_name(self, ui):
         name = ui.get('name')
