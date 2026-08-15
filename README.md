@@ -11,6 +11,8 @@ Raspberry Pi Zero 2 W with a Waveshare 2.13" v3 display, 250x122, and a PiSugar 
 | [`pisugarx_ext.py`](pisugarx_ext.py) | Fork of the bundled `pisugarx`: `BAT` / `CHG` / `EXT` instead of `CHG` at any charge, standalone voltage and temperature with an out of range marker, two upstream fixes |
 | [`age_caps.py`](age_caps.py) | Fork of AlienMajik's `age`: uppercase labels, `EXP` instead of `Next Age`, three upstream fixes |
 | [`memtemp_caps.py`](memtemp_caps.py) | Fork of the bundled `memtemp`: uppercase headers, heavier fonts |
+| [`pisugar_custom_button.py`](pisugar_custom_button.py) | Binds the PiSugar custom button to plugin events, the board LEDs or the AUTO/MANU switch |
+| [`pasv_mode.py`](pasv_mode.py) | A third state between AUTO and MANU: keeps listening, stops deauthenticating, associating and advertising |
 | [`ui_tweaks.py`](ui_tweaks.py) | Moves and restyles built-in elements, and adds a connectivity indicator with the pwngrid inbox counter |
 
 Each plugin documents its own options, its reasoning and its caveats in `__help__`, which is what
