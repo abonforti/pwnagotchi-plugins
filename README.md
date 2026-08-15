@@ -59,17 +59,6 @@ would poll the same device and both would draw over each other.
 | `age_caps` | `age` |
 | `memtemp_caps` | `memtemp` |
 
-## Fixes carried upstream
-
-The forks here exist for looks, but three of them also carry fixes that are worth having anywhere.
-Those have been sent to the projects they came from, and the forks can go once they land.
-
-| Where | What | Status |
-| --- | --- | --- |
-| [jayofelony#599](https://github.com/jayofelony/pwnagotchi/pull/599) | `pisugarx` cuts power during the sync, and recomputes a percentage the MCU already reports in `0x2A` | open |
-| [jayofelony#600](https://github.com/jayofelony/pwnagotchi/pull/600) | the web inbox never marks messages as read | open |
-| [AlienMajik#33](https://github.com/AlienMajik/pwnagotchi_plugins/pull/33) | `age` seeds the handshake count from the wrong directory and extension, and mangles the points | open |
-
 ## Layout
 
 Every plugin is a single `.py` file **in the repository root**. This is not a style choice.
