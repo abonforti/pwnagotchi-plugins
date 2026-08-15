@@ -1,12 +1,15 @@
 import logging
+import threading
 
 import pwnagotchi.plugins as plugins
 import pwnagotchi.ui.fonts as fonts
+from pwnagotchi.ui.components import Text
+from pwnagotchi.ui.view import BLACK
 
 
 class UiTweaks(plugins.Plugin):
     __author__ = 'abonforti'
-    __version__ = '1.5.0'
+    __version__ = '1.6.0'
     __license__ = 'GPL3'
     __description__ = (
         'Small cosmetic rewrites of built-in UI elements: the prompt character after the name, '
@@ -33,6 +36,14 @@ class UiTweaks(plugins.Plugin):
       status_x_coord = 130     # moves it right, off the face
       friend_x_coord = 95      # moves the closest peer line into the bottom bar
       friend_y_coord = 110
+      net_x_coord = 82         # connectivity indicator, omit to disable it entirely
+      net_y_coord = 20
+      net_up_text = "UP"
+      net_down_text = "DOWN"
+      net_url = "http://cp.cloudflare.com/generate_204"
+      net_interval = 60
+      net_timeout = 3
+      net_font = "Bold"
       friend_font = "Medium"   # match the PWND value instead of the smaller default
       friend_preview = "<bars> peer 3 (12)"   # layout aid, remove afterwards
 
@@ -82,6 +93,23 @@ class UiTweaks(plugins.Plugin):
     seventeen character peer line grows from 82 to 102 pixels, and a long peer name can reach the
     mode indicator at 225.
 
+    The connectivity indicator is a bare Text, not a LabeledValue: 'UP' and 'DOWN' already say
+    what they mean and a label would need room this row does not have. It only exists when both
+    net coordinates are configured, and only then is the polling thread started.
+
+    Nothing else on screen answers the question. BT reports the Bluetooth link, and even its 'C'
+    state only means the network profile is up: a phone with no signal or with mobile data off
+    still reads BT C. bt-tether can test connectivity but only exposes it through its web page.
+
+    grid.is_connected() is deliberately not reused, because it waits up to 30 seconds to connect
+    and 60 to read, and it answers 'no internet' whenever api.opwngrid.xyz itself is down. This
+    uses a captive portal probe instead, which returns 204 with no body.
+
+    The default endpoint is Cloudflare rather than the more common gstatic one, since this is a
+    device you carry around and the probe is a beacon that repeats on every interval. Point
+    net_url wherever you prefer; note that aiming it at a host on your own tailnet tells you the
+    tunnel is up, not that the internet is.
+
     The blinking cursor from ui.cursor is preserved: it is stripped before the suffix is replaced
     and put back afterwards.
     """
@@ -97,6 +125,16 @@ class UiTweaks(plugins.Plugin):
         self.friend_y = None
         self.friend_preview = None
         self.friend_font = None
+        self.net_position = None
+        self.net_font = 'Bold'
+        self.net_up_text = 'UP'
+        self.net_down_text = 'DOWN'
+        self.net_url = 'http://cp.cloudflare.com/generate_204'
+        self.net_interval = 60
+        self.net_timeout = 3
+        self._online = False
+        self._stop = threading.Event()
+        self._thread = None
 
     def on_loaded(self):
         self.name_suffix = str(self.options.get('name_suffix', '_'))
@@ -118,11 +156,38 @@ class UiTweaks(plugins.Plugin):
         self.friend_preview = self.options.get('friend_preview') or None
         self.friend_font = self.options.get('friend_font') or None
 
+        x = self.options.get('net_x_coord')
+        y = self.options.get('net_y_coord')
+        self.net_position = (int(x), int(y)) if x is not None and y is not None else None
+        self.net_font = self.options.get('net_font', self.net_font)
+        self.net_up_text = self.options.get('net_up_text', self.net_up_text)
+        self.net_down_text = self.options.get('net_down_text', self.net_down_text)
+        self.net_url = self.options.get('net_url', self.net_url)
+        self.net_interval = max(10, int(self.options.get('net_interval', 60)))
+        self.net_timeout = max(1, int(self.options.get('net_timeout', 3)))
+
         logging.info(
             "[ui_tweaks] loaded, name suffix %r, uptime seconds %s, uptime x %s, status %s",
             self.name_suffix, self.uptime_seconds, self.uptime_x,
             (self.status_x, self.status_y),
         )
+
+        if self.net_position is not None:
+            logging.info(
+                "[ui_tweaks] connectivity check every %ds against %s",
+                self.net_interval, self.net_url,
+            )
+            self._stop.clear()
+            self._thread = threading.Thread(target=self._watch_net, daemon=True)
+            self._thread.start()
+
+    def on_unload(self, ui):
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=self.net_timeout + 1)
+        if self.net_position is not None:
+            with ui._lock:
+                ui.remove_element('netstatus')
 
     def on_ui_setup(self, ui):
         if self.uptime_x is not None:
@@ -133,6 +198,19 @@ class UiTweaks(plugins.Plugin):
             self._move(ui, 'friend_name', x=self.friend_x, y=self.friend_y)
         if self.friend_font is not None:
             self._restyle(ui, 'friend_name', self.friend_font)
+
+        if self.net_position is not None:
+            # A bare Text rather than a LabeledValue: the words already say what
+            # they mean, and a label would need room the row does not have.
+            ui.add_element(
+                'netstatus',
+                Text(
+                    color=BLACK,
+                    value=self.net_down_text,
+                    position=self.net_position,
+                    font=getattr(fonts, self.net_font, fonts.Bold),
+                ),
+            )
 
     def _restyle(self, ui, key, font_name):
         font = getattr(fonts, font_name, None)
@@ -165,6 +243,8 @@ class UiTweaks(plugins.Plugin):
         self._fix_name(ui)
         if not self.uptime_seconds:
             self._trim_uptime(ui)
+        if self.net_position is not None and 'netstatus' in ui._state._state:
+            ui.set('netstatus', self.net_up_text if self._online else self.net_down_text)
         if self.friend_preview:
             # Layout aid only. The peer line is normally empty until another
             # pwnagotchi is in range, which makes its placement impossible to
@@ -186,6 +266,25 @@ class UiTweaks(plugins.Plugin):
 
         if base.endswith('>'):
             ui.set('name', base[:-1] + self.name_suffix + cursor)
+
+    def _watch_net(self):
+        import requests
+
+        while not self._stop.is_set():
+            online = False
+            try:
+                # A captive portal probe: 204 with no body, so the answer is a
+                # status code rather than a page to download.
+                response = requests.get(self.net_url, timeout=self.net_timeout)
+                online = response.status_code in (200, 204)
+            except Exception as e:
+                logging.debug("[ui_tweaks] connectivity check failed: %s", e)
+
+            if online != self._online:
+                logging.info("[ui_tweaks] connectivity %s", "up" if online else "down")
+                self._online = online
+
+            self._stop.wait(self.net_interval)
 
     def _trim_uptime(self, ui):
         uptime = ui.get('uptime')
