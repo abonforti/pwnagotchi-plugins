@@ -7,7 +7,7 @@ Raspberry Pi Zero 2 W with a Waveshare 2.13" v3 display, 250x122, and a PiSugar 
 
 | Plugin | What it does |
 | --- | --- |
-| [`pisugar_power_button.py`](pisugar_power_button.py) | PiSugar buttons: power halts cleanly instead of dropping the rail, custom button switches passive mode, LEDs or AUTO/MANU |
+| [`pisugar_power_button.py`](pisugar_power_button.py) | Long press on the PiSugar power button syncs and halts, then cuts power, instead of dropping the rail mid write |
 | [`pisugarx_ext.py`](pisugarx_ext.py) | Fork of the bundled `pisugarx`: `BAT` / `CHG` / `EXT` instead of `CHG` at any charge, standalone voltage and temperature with an out of range marker, two upstream fixes |
 | [`age_caps.py`](age_caps.py) | Fork of AlienMajik's `age`: uppercase labels, `EXP` instead of `Next Age`, three upstream fixes |
 | [`memtemp_caps.py`](memtemp_caps.py) | Fork of the bundled `memtemp`: uppercase headers, heavier fonts |
