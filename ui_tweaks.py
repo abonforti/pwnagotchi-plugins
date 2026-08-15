@@ -12,7 +12,7 @@ CHAR_WIDTH = 6.02
 
 class UiTweaks(plugins.Plugin):
     __author__ = 'abonforti'
-    __version__ = '1.7.0'
+    __version__ = '1.7.1'
     __license__ = 'GPL3'
     __description__ = (
         'Small cosmetic rewrites of built-in UI elements: the prompt character after the name, '
@@ -361,6 +361,11 @@ class UiTweaks(plugins.Plugin):
             messages = messages.json().get('messages') or []
         except Exception as e:
             logging.debug("[ui_tweaks] inbox read failed: %s", e)
+            return ''
+
+        if not messages:
+            # An empty inbox is not worth the pixels: drop the counter entirely
+            # rather than printing (0).
             return ''
 
         unread = any(m.get('seen_at') is None for m in messages)
