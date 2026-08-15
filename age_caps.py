@@ -27,7 +27,7 @@ from pwnagotchi.ui.view import BLACK
 
 class Age(plugins.Plugin):
     __author__ = 'AlienMajik, fork by abonforti'
-    __version__ = '4.0.1-caps'
+    __version__ = '4.0.2-caps'
     __license__ = 'MIT'
     __description__ = ('Age plugin with prestige, random events, animated progress, '
                        'narrative lore, cheeky quotes, and a dedicated status display. '
@@ -72,6 +72,11 @@ class Age(plugins.Plugin):
 
     Seeding only runs when the stored count is zero, so an existing /root/age_strength.json keeps
     its numbers and nothing is recounted.
+
+    A third bug is fixed in abrev_number, which formatted the points shown next to PTS. It used
+    rstrip('.0') to drop a trailing '.0', but rstrip removes every trailing character in the set,
+    not a suffix, so any value ending in zero came out mangled: 0 rendered as an empty string, 100
+    as '1', 120 as '12' and 1500 as '15'.
     """
 
     # --- Quote Library ---
@@ -861,6 +866,11 @@ class Age(plugins.Plugin):
     def abrev_number(self, num):
         for unit in ['', 'K', 'M', 'B']:
             if abs(num) < 1000:
-                return f"{num:.1f}{unit}".rstrip('.0')
+                # rstrip('.0') strips *characters*, not a suffix, so upstream turned
+                # 0 into an empty string, 100 into "1" and 120 into "12".
+                text = f"{num:.1f}"
+                if text.endswith('.0'):
+                    text = text[:-2]
+                return f"{text}{unit}"
             num /= 1000.0
         return f"{num:.1f}T"

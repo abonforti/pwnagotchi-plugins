@@ -64,6 +64,7 @@ class PiSugarServer:
         self.allow_charging = True
         self.lowpower_shutdown = False
         self.lowpower_shutdown_level = 10
+        self.shutdown_delay = 45
         self.max_charge_voltage_protection = False
         self.max_protection_level=80
         # Start the device connection in a background thread
@@ -185,7 +186,14 @@ class PiSugarServer:
                         self.set_battery_allow_charging()
 
                 self.voltage_history.append(self.battery_voltage)
-                self.battery_level = self.convert_battery_voltage_to_level()
+                if self.model == 'PiSugar3':
+                    # The MCU already reports the percentage in 0x2A. Upstream throws
+                    # it away and re-derives the level from a voltage curve, which is
+                    # what pisugar-power-manager does for the PiSugar 2 chips that
+                    # have no such register.
+                    self.battery_level = self.i2creg[0x2A]
+                else:
+                    self.battery_level = self.convert_battery_voltage_to_level()
 
                 if self.lowpower_shutdown:
                     if self.battery_level < self.lowpower_shutdown_level:
@@ -200,13 +208,15 @@ class PiSugarServer:
     def shutdown(self):
         # logging.info("[PiSugarX] PiSugar set shutdown .")
         if self.model == 'PiSugar3':
-            # Shutdown the power after 10 seconds
+            # Cut the rail after shutdown_delay seconds. Upstream used 10, which is
+            # exactly how long pwnagotchi.shutdown() sleeps refreshing the display
+            # before it even starts syncing the zram mounts to the SD card.
             self._bus.write_byte_data(self.address, 0x0B, 0x29)  # Disable write protection
-            self._bus.write_byte_data(self.address, 0x09, 10)
+            self._bus.write_byte_data(self.address, 0x09, self.shutdown_delay)
             self._bus.write_byte_data(self.address, 0x02, self._bus.read_byte_data(
                 self.address, 0x02) & 0b11011111)
             self._bus.write_byte_data(self.address, 0x0B, 0x00)  # Enable write protection
-            logging.info("[PiSugarX] PiSugar shutdown in 10s.")
+            logging.info(f"[PiSugarX] PiSugar shutdown in {self.shutdown_delay}s.")
         elif self.model == 'PiSugar2':
             pass
         elif self.model == 'PiSugar2Plus':
@@ -533,7 +543,7 @@ class PiSugarServer:
 
 class PiSugar(plugins.Plugin):
     __author__ = "jayofelony, fork by abonforti"
-    __version__ = "1.2-ext"
+    __version__ = "1.3-ext"
     __license__ = "GPL3"
     __description__ = (
         "A plugin that will add a voltage indicator for the PiSugar batteries. "
@@ -574,6 +584,7 @@ class PiSugar(plugins.Plugin):
       full_level = 99
       lowpower_shutdown = true
       lowpower_shutdown_level = 10
+      shutdown_delay = 45
       max_charge_voltage_protection = false
 
     Second change, forced by the rename: upstream reads its options from a hardcoded section name,
@@ -586,13 +597,17 @@ class PiSugar(plugins.Plugin):
     Disable the bundled pisugarx when enabling this one. Both poll the same I2C device and both
     add a 'bat' element.
 
-    Two upstream problems are left alone, on purpose, since they are not what this fork is about:
+    Two more upstream problems are fixed here.
 
-      - the low battery shutdown arms the PiSugar power cut with a 10 second delay and then calls
-        pwnagotchi.shutdown(), which sleeps 10 seconds refreshing the display before it even
-        starts syncing. The rail can drop during the write.
-      - the battery percentage is recomputed in Python from a voltage curve with a trimmed mean,
-        while the MCU already reports it in register 0x2A.
+    The low battery shutdown armed the PiSugar power cut with a fixed 10 second delay and then
+    called pwnagotchi.shutdown(), which sleeps 10 seconds refreshing the display before it even
+    starts syncing the zram mounts, then hands over to halt. The rail could drop mid write. The
+    delay is now shutdown_delay, defaulting to 45. A longer delay costs a few tens of
+    milliamperes for a few extra seconds, which is not worth optimising against a corrupt card.
+
+    The battery percentage was recomputed in Python from a voltage curve, with a trimmed mean over
+    ten samples, while the PiSugar 3 MCU already reports it in register 0x2A. The curve is still
+    used for PiSugar 2 and 2 Plus, which have no such register.
     """
 
     def __init__(self):
@@ -661,6 +676,7 @@ class PiSugar(plugins.Plugin):
         self.ps.lowpower_shutdown = self.options['lowpower_shutdown']
         self.ps.lowpower_shutdown_level = self.options['lowpower_shutdown_level']
         self.ps.max_charge_voltage_protection = self.options['max_charge_voltage_protection']
+        self.ps.shutdown_delay = int(cfg.get('shutdown_delay', 45))
 
     def on_ready(self, agent):
         try:
