@@ -1,4 +1,5 @@
 import logging
+import os
 import threading
 
 import pwnagotchi
@@ -11,7 +12,7 @@ MESH_URL = 'http://127.0.0.1:8666/api/v1/mesh/%s'
 
 class PasvMode(plugins.Plugin):
     __author__ = 'abonforti'
-    __version__ = '1.0.0'
+    __version__ = '1.1.0'
     __license__ = 'GPL3'
     __description__ = (
         'A passive mode that keeps listening but stops transmitting: no deauthentication, no '
@@ -45,11 +46,12 @@ class PasvMode(plugins.Plugin):
 
       [main.plugins.pasv_mode]
       enabled = true
-      label = "PASV"           # shown in place of AUTO, four characters at most
+      label = "PASV"      # shown in place of AUTO, four characters at most
       show_on_display = true
-      restore_on_load = false  # start passive, useful if the unit lives in a sensitive place
-      mesh = true              # also stop advertising, not just attacking
+      mesh = true         # also stop advertising, not just attacking
       mesh_timeout = 3
+      persist = true      # survive a restart, see below
+      confd = "/etc/pwnagotchi/conf.d/"   # defaults to main.confd
 
     ## Controlling it
 
@@ -68,13 +70,36 @@ class PasvMode(plugins.Plugin):
     the caller does not block. That is the point: a button plugin should not know how any of this
     works.
 
+    ## Surviving a restart
+
+    A unit that reboots in the place you went passive for, and comes back attacking, is worse than
+    no passive mode at all. So the state persists.
+
+    Not by rewriting config.toml, which save_config() would rewrite whole, dumping every merged
+    default into a hand kept file. A drop-in is written to main.confd instead, holding nothing but
+    the three flags. Drop-ins are merged after config.toml and take precedence:
+
+        for conf in glob.glob(dropin):
+            additional_config = load_toml_file(conf)
+            config = merge_config(additional_config, config)
+
+    So on the next boot the flags are false from the very first moment. That is not the same as
+    restoring the state once running: start_advertising() is called during agent.start(), so a
+    unit that restored afterwards would already have gone on the air. This way it never does.
+
+    On load, the plugin only has to notice the file is there and adopt the state. Nothing to
+    apply, since the config was already correct before anything started.
+
+    The drop-in carries an empty [main] table, which is not decoration: load_toml_file() treats a
+    file that does not contain that string as old style dotted toml, renames it to .ORIG and
+    rewrites it.
+
+    Leaving passive mode deletes the file. If it is ever left behind, deleting it by hand and
+    restarting is enough, and the log says where it is at every load.
+
     ## What it does not do
 
-    It changes the running configuration, not config.toml, so a restart brings back whatever is
-    written there. That is deliberate: passive mode is a thing you do somewhere, not a setting.
-    Use restore_on_load if you want the opposite.
-
-    It also cannot promise silence. It stops the transmissions pwnagotchi controls; it says
+    It cannot promise silence. It stops the transmissions pwnagotchi controls; it says
     nothing about the wlan0 interface itself, about bluetooth, or about anything else on the
     device. Verify from outside with a second radio in monitor mode: look for beacons carrying the
     pwngrid vendor element, and for deauthentication frames from this unit.
@@ -86,6 +111,8 @@ class PasvMode(plugins.Plugin):
         self.show_on_display = True
         self.mesh = True
         self.mesh_timeout = 3
+        self.persist = True
+        self.dropin = None
         self.passive = False
         self._agent = None
         self._lock = threading.Lock()
@@ -113,14 +140,44 @@ class PasvMode(plugins.Plugin):
             if self.mesh:
                 result['mesh'] = self._set_mesh(not wanted)
 
+            if self.persist:
+                result['dropin'] = self._write_dropin(wanted)
+
             self.passive = wanted
             result['passive'] = wanted
 
             logging.warning(
-                "[pasv_mode] passive=%s deauth=%s associate=%s mesh=%s",
-                result['passive'], result['deauth'], result['associate'], result['mesh'],
+                "[pasv_mode] passive=%s deauth=%s associate=%s mesh=%s dropin=%s",
+                result['passive'], result['deauth'], result['associate'],
+                result['mesh'], result.get('dropin', 'off'),
             )
             return result
+
+    # --- surviving a restart -----------------------------------------------
+
+    def _write_dropin(self, wanted):
+        """
+        Drop-ins in main.confd are merged after config.toml and win, so writing the
+        three flags there makes them false from the very first moment of the next
+        boot. Restoring the state after startup would not be equivalent:
+        start_advertising() runs once during agent.start() and would already have
+        put the unit on the air.
+        """
+        if not self.dropin:
+            return 'no confd'
+
+        try:
+            if not wanted:
+                if os.path.exists(self.dropin):
+                    os.remove(self.dropin)
+                return 'removed'
+
+            os.makedirs(os.path.dirname(self.dropin), exist_ok=True)
+            with open(self.dropin, 'w') as handle:
+                handle.write(DROPIN)
+            return 'written'
+        except OSError as e:
+            return 'failed: %s' % e
 
     def _set_mesh(self, enabled):
         try:
@@ -150,12 +207,27 @@ class PasvMode(plugins.Plugin):
         self.show_on_display = bool(self.options.get('show_on_display', True))
         self.mesh = bool(self.options.get('mesh', True))
         self.mesh_timeout = max(1, int(self.options.get('mesh_timeout', 3)))
-        logging.info("[pasv_mode] loaded, label %r, mesh %s", self.label, self.mesh)
+        self.persist = bool(self.options.get('persist', True))
+
+        confd = self.options.get('confd')
+        if not confd:
+            try:
+                confd = pwnagotchi.config['main']['confd']
+            except (AttributeError, KeyError, TypeError):
+                confd = None
+        self.dropin = os.path.join(confd, 'pasv.toml') if confd else None
+
+        # The drop-in was already merged at boot, so the flags are false and the
+        # unit never went on the air. Nothing to apply: only the state to adopt.
+        if self.persist and self.dropin and os.path.exists(self.dropin):
+            self.passive = True
+            logging.warning("[pasv_mode] started passive, %s is present", self.dropin)
+
+        logging.info("[pasv_mode] loaded, label %r, mesh %s, dropin %s",
+                     self.label, self.mesh, self.dropin or 'disabled')
 
     def on_ready(self, agent):
         self._agent = agent
-        if self.options.get('restore_on_load', False) and not self.passive:
-            self.set_passive(True)
 
     def on_ui_update(self, ui):
         # on_ready never fires in manual mode, since the event comes from
@@ -188,14 +260,32 @@ class PasvMode(plugins.Plugin):
                 'passive': self.passive,
                 'mesh': self.mesh,
                 'label': self.label,
+                'persist': self.persist,
+                'dropin': self.dropin,
             })
 
         if path is None or path == '/':
-            return render_template_string(PAGE, passive=self.passive, mesh=self.mesh)
+            return render_template_string(PAGE, passive=self.passive, mesh=self.mesh,
+                                          persist=self.persist)
 
         from flask import abort
         abort(404)
 
+
+DROPIN = """# Written by the pasv_mode plugin. Delete this file to leave passive mode.
+#
+# Drop-ins in main.confd are merged after config.toml and take precedence, so
+# these are in force from the first moment of the boot, before anything can
+# transmit. The empty [main] table is not decoration: load_toml_file() treats a
+# file without that string as old style dotted toml, renames it to .ORIG and
+# rewrites it.
+[main]
+
+[personality]
+advertise = false
+deauth = false
+associate = false
+"""
 
 PAGE = """
 <!DOCTYPE html>
@@ -231,8 +321,12 @@ PAGE = """
     Recon and channel hopping continue, and handshakes that happen anyway are still captured.
   </p>
   <p class="note">
-    This changes the running configuration, not config.toml: a restart brings back whatever is
-    written there.
+    {% if persist %}
+    The state survives a restart: a drop-in in conf.d holds the three flags, so a reboot comes
+    back passive without ever going on the air.
+    {% else %}
+    Persistence is off, so a restart brings back whatever config.toml says.
+    {% endif %}
   </p>
 </body>
 </html>
