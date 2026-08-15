@@ -4,7 +4,6 @@ import threading
 
 import pwnagotchi
 import pwnagotchi.plugins as plugins
-import pwnagotchi.ui.faces as faces
 
 # pwngrid-peer listens here. Advertising cannot be stopped through the config,
 # see the note in __help__.
@@ -13,7 +12,7 @@ MESH_URL = 'http://127.0.0.1:8666/api/v1/mesh/%s'
 
 class PasvMode(plugins.Plugin):
     __author__ = 'abonforti'
-    __version__ = '1.2.2'
+    __version__ = '1.3.0'
     __license__ = 'GPL3'
     __description__ = (
         'A passive mode that keeps listening but stops transmitting: no deauthentication, no '
@@ -52,7 +51,6 @@ class PasvMode(plugins.Plugin):
       mesh = true         # also stop advertising, not just attacking
       mesh_timeout = 3
       persist = true      # survive a restart, see below
-      face = "(≖‿‿≖)"     # held while passive, "" to leave the face alone
       confd = "/etc/pwnagotchi/conf.d/"   # defaults to main.confd
 
     ## Controlling it
@@ -72,21 +70,20 @@ class PasvMode(plugins.Plugin):
     the caller does not block. That is the point: a button plugin should not know how any of this
     works.
 
-    ## The face
+    ## About the face
 
     A passive unit stops interacting, so the epoch counter of inactive rounds climbs and the mood
     machinery walks it through bored and then sad. The face ends up telling a story that has
-    nothing to do with what is happening: it is not sad, it is doing what it was told.
+    nothing to do with what is happening.
 
-    While passive the face is therefore held at the configured one, reasserted on every update
-    because the mood machinery rewrites it. Set face to an empty string to leave it alone.
+    Holding it at a fixed one was tried and removed. plugins.on('ui_update') only queues the
+    event, so a plugin handler runs on its own thread while the draw loop is already going: the
+    value lands before or after its widget is drawn depending on timing, and the face alternates
+    instead of settling. Forcing a repaint after each write did not fix it either and cost a
+    second refresh of the panel on every mood change.
 
-    Both the face and the label only apply in auto, together. PASV is not a state in manual: the
-    unit is not transmitting there in the first place, the corner already reads MANU, and holding
-    a face for a state the screen does not announce would just be confusing.
-
-    Keep to glyphs DejaVuSansMono-Bold actually has. Several of the stock faces contain katakana,
-    hangul or halfwidth forms it does not cover, and those render as empty boxes.
+    Doing it properly would mean on_state_change('face', ...), but that mechanism holds a single
+    listener per key and mesh/utils.py already owns that one to keep the advertised face in sync.
 
     ## Surviving a restart
 
@@ -130,9 +127,7 @@ class PasvMode(plugins.Plugin):
         self.mesh = True
         self.mesh_timeout = 3
         self.persist = True
-        self.face = '(≖‿‿≖)'
         self.dropin = None
-        self._restore_face = False
         self.passive = False
         self._agent = None
         self._lock = threading.Lock()
@@ -162,9 +157,6 @@ class PasvMode(plugins.Plugin):
 
             if self.persist:
                 result['dropin'] = self._write_dropin(wanted)
-
-            if self.passive and not wanted:
-                self._restore_face = True
 
             self.passive = wanted
             result['passive'] = wanted
@@ -231,7 +223,6 @@ class PasvMode(plugins.Plugin):
         self.mesh = bool(self.options.get('mesh', True))
         self.mesh_timeout = max(1, int(self.options.get('mesh_timeout', 3)))
         self.persist = bool(self.options.get('persist', True))
-        self.face = self.options.get('face', self.face) or None
 
         confd = self.options.get('confd')
         if not confd:
@@ -272,24 +263,6 @@ class PasvMode(plugins.Plugin):
 
         if 'mode' in ui._state._state:
             ui.set('mode', self.label if self.passive else 'AUTO')
-
-        # The face has to be reasserted, since the mood machinery rewrites it, and
-        # reasserting it is not enough on its own: plugins.on('ui_update') only
-        # queues, so this runs on another thread while the draw loop is already
-        # going. Half the time the value lands after its widget was drawn and the
-        # face visibly alternates. Forcing a repaint after a write settles it.
-        #
-        # The comparison is what stops this looping: once the value matches,
-        # nothing is written and no repaint is asked for.
-        if self.face:
-            if self.passive and ui.get('face') != self.face:
-                ui.set('face', self.face)
-                ui.update()
-            elif not self.passive and self._restore_face:
-                # Nothing would repaint it until the next mood change, which can
-                # be a whole epoch away, so hand back a neutral one right now.
-                self._restore_face = False
-                ui.set('face', getattr(faces, 'AWAKE', '(◕‿‿◕)'))
 
     # --- web ---------------------------------------------------------------
 
