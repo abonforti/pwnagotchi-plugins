@@ -13,7 +13,7 @@ MESH_URL = 'http://127.0.0.1:8666/api/v1/mesh/%s'
 
 class PasvMode(plugins.Plugin):
     __author__ = 'abonforti'
-    __version__ = '1.2.1'
+    __version__ = '1.2.2'
     __license__ = 'GPL3'
     __description__ = (
         'A passive mode that keeps listening but stops transmitting: no deauthentication, no '
@@ -273,12 +273,19 @@ class PasvMode(plugins.Plugin):
         if 'mode' in ui._state._state:
             ui.set('mode', self.label if self.passive else 'AUTO')
 
-        # The face is rewritten by whatever mood the automata is in, so it has to
-        # be reasserted on every update rather than set once.
+        # The face has to be reasserted, since the mood machinery rewrites it, and
+        # reasserting it is not enough on its own: plugins.on('ui_update') only
+        # queues, so this runs on another thread while the draw loop is already
+        # going. Half the time the value lands after its widget was drawn and the
+        # face visibly alternates. Forcing a repaint after a write settles it.
+        #
+        # The comparison is what stops this looping: once the value matches,
+        # nothing is written and no repaint is asked for.
         if self.face:
-            if self.passive:
+            if self.passive and ui.get('face') != self.face:
                 ui.set('face', self.face)
-            elif self._restore_face:
+                ui.update()
+            elif not self.passive and self._restore_face:
                 # Nothing would repaint it until the next mood change, which can
                 # be a whole epoch away, so hand back a neutral one right now.
                 self._restore_face = False
