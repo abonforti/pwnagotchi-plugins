@@ -9,6 +9,7 @@ Raspberry Pi Zero 2 W with a Waveshare 2.13" v3 display and a PiSugar 3.
 | [`memtemp_caps.py`](memtemp_caps.py) | Cosmetic fork of the bundled `memtemp`: uppercase headers, heavier fonts |
 | [`age_caps.py`](age_caps.py) | Cosmetic fork of AlienMajik's `age`: uppercase labels, `EXP` instead of `Next Age` |
 | [`ui_tweaks.py`](ui_tweaks.py) | Rewrites the prompt character after the name and drops the seconds from `UP` |
+| [`pisugarx_ext.py`](pisugarx_ext.py) | Fork of the bundled `pisugarx`: `BAT` / `CHG` / `EXT` instead of `CHG` at any charge |
 
 ## Installing
 
