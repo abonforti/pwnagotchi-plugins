@@ -1,11 +1,12 @@
 import logging
 
 import pwnagotchi.plugins as plugins
+import pwnagotchi.ui.fonts as fonts
 
 
 class UiTweaks(plugins.Plugin):
     __author__ = 'abonforti'
-    __version__ = '1.4.0'
+    __version__ = '1.5.0'
     __license__ = 'GPL3'
     __description__ = (
         'Small cosmetic rewrites of built-in UI elements: the prompt character after the name, '
@@ -32,6 +33,7 @@ class UiTweaks(plugins.Plugin):
       status_x_coord = 130     # moves it right, off the face
       friend_x_coord = 95      # moves the closest peer line into the bottom bar
       friend_y_coord = 110
+      friend_font = "Medium"   # match the PWND value instead of the smaller default
       friend_preview = "<bars> peer 3 (12)"   # layout aid, remove afterwards
 
     Dropping the seconds is worth it when ui.fps is 0: the uptime is in the view's ignore list, so
@@ -71,8 +73,14 @@ class UiTweaks(plugins.Plugin):
         'friend_name': Text(value=None, position=self._layout['friend_face'], font=fonts.BoldSmall, ...),
 
     The bottom bar holds only PWND on the left and the mode on the right at x 225, so roughly
-    x 95 to 225 is free. At BoldSmall a character is about 4.8 pixels wide, which leaves room for
-    some 27 characters, enough for four signal bars, a peer name and its two counters.
+    x 95 to 225 is free.
+
+    friend_font names an attribute of pwnagotchi.ui.fonts, so Small, Medium, Bold, BoldSmall,
+    BoldBig or Huge. The peer line is drawn in BoldSmall at 8 pixels while the PWND value next to
+    it uses Medium at 10, which is why it looks undersized down there; 'Medium' matches it. Mind
+    the width when you enlarge it: at 10 pixels a character is 6 wide instead of 4.8, so a
+    seventeen character peer line grows from 82 to 102 pixels, and a long peer name can reach the
+    mode indicator at 225.
 
     The blinking cursor from ui.cursor is preserved: it is stripped before the suffix is replaced
     and put back afterwards.
@@ -88,6 +96,7 @@ class UiTweaks(plugins.Plugin):
         self.friend_x = None
         self.friend_y = None
         self.friend_preview = None
+        self.friend_font = None
 
     def on_loaded(self):
         self.name_suffix = str(self.options.get('name_suffix', '_'))
@@ -107,6 +116,7 @@ class UiTweaks(plugins.Plugin):
         y = self.options.get('friend_y_coord')
         self.friend_y = int(y) if y is not None else None
         self.friend_preview = self.options.get('friend_preview') or None
+        self.friend_font = self.options.get('friend_font') or None
 
         logging.info(
             "[ui_tweaks] loaded, name suffix %r, uptime seconds %s, uptime x %s, status %s",
@@ -121,6 +131,20 @@ class UiTweaks(plugins.Plugin):
             self._move(ui, 'status', x=self.status_x, y=self.status_y)
         if self.friend_x is not None or self.friend_y is not None:
             self._move(ui, 'friend_name', x=self.friend_x, y=self.friend_y)
+        if self.friend_font is not None:
+            self._restyle(ui, 'friend_name', self.friend_font)
+
+    def _restyle(self, ui, key, font_name):
+        font = getattr(fonts, font_name, None)
+        if font is None:
+            logging.warning("[ui_tweaks] unknown font %r", font_name)
+            return
+        try:
+            ui._state._state[key].font = font
+        except (AttributeError, KeyError):
+            logging.warning("[ui_tweaks] no %s element to restyle", key)
+            return
+        logging.info("[ui_tweaks] %s font set to %s", key, font_name)
 
     def _move(self, ui, key, x=None, y=None):
         # There is no public accessor for a widget, only for its value, so reach
