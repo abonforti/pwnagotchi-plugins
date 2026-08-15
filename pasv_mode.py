@@ -13,7 +13,7 @@ MESH_URL = 'http://127.0.0.1:8666/api/v1/mesh/%s'
 
 class PasvMode(plugins.Plugin):
     __author__ = 'abonforti'
-    __version__ = '1.2.0'
+    __version__ = '1.2.1'
     __license__ = 'GPL3'
     __description__ = (
         'A passive mode that keeps listening but stops transmitting: no deauthentication, no '
@@ -80,6 +80,10 @@ class PasvMode(plugins.Plugin):
 
     While passive the face is therefore held at the configured one, reasserted on every update
     because the mood machinery rewrites it. Set face to an empty string to leave it alone.
+
+    Both the face and the label only apply in auto, together. PASV is not a state in manual: the
+    unit is not transmitting there in the first place, the corner already reads MANU, and holding
+    a face for a state the screen does not announce would just be confusing.
 
     Keep to glyphs DejaVuSansMono-Bold actually has. Several of the stock faces contain katakana,
     hangul or halfwidth forms it does not cover, and those render as empty boxes.
@@ -258,6 +262,17 @@ class PasvMode(plugins.Plugin):
         if not self.show_on_display:
             return
 
+        # Everything below is the visible side of PASV, and PASV is only a state
+        # in auto. In manual the unit is not transmitting anyway, the corner
+        # already reads MANU, and claiming anything else there would contradict
+        # it. view.py writes 'mode' from exactly one place, on_manual_mode, so in
+        # auto nothing else touches it and there is nobody to race with.
+        if getattr(self._agent, 'mode', None) != 'auto':
+            return
+
+        if 'mode' in ui._state._state:
+            ui.set('mode', self.label if self.passive else 'AUTO')
+
         # The face is rewritten by whatever mood the automata is in, so it has to
         # be reasserted on every update rather than set once.
         if self.face:
@@ -268,16 +283,6 @@ class PasvMode(plugins.Plugin):
                 # be a whole epoch away, so hand back a neutral one right now.
                 self._restore_face = False
                 ui.set('face', getattr(faces, 'AWAKE', '(◕‿‿◕)'))
-
-        if 'mode' not in ui._state._state:
-            return
-
-        # view.py writes 'mode' from exactly one place, on_manual_mode, so in auto
-        # nothing else touches it and there is nobody to race with. In manual it
-        # is left alone: a manual pwnagotchi is not transmitting anyway.
-        if getattr(self._agent, 'mode', None) != 'auto':
-            return
-        ui.set('mode', self.label if self.passive else 'AUTO')
 
     # --- web ---------------------------------------------------------------
 
