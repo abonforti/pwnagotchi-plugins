@@ -543,7 +543,7 @@ class PiSugarServer:
 
 class PiSugar(plugins.Plugin):
     __author__ = "jayofelony, fork by abonforti"
-    __version__ = "1.5-ext"
+    __version__ = "1.6-ext"
     __license__ = "GPL3"
     __description__ = (
         "A plugin that will add a voltage indicator for the PiSugar batteries. "
@@ -610,8 +610,11 @@ class PiSugar(plugins.Plugin):
     3A, so 60 marks the point where things are no longer routine while leaving margin to the 85C
     limit.
 
-    The marker is suppressed until the device reports ready, otherwise the 0.00V placeholder used
-    before the first read would show up as an alarm.
+    Third change: when the PiSugar does not answer on I2C, all three readings show '-' instead of
+    zeros. Upstream substitutes 0 for a missing reading, so a Pi running on its own micro-USB with
+    the PiSugar unpowered displays 'BAT 0%', which is indistinguishable from a flat battery. The
+    dash is one character wide, so nothing else on the top bar moves. The not-ready notice is also
+    logged once per state change rather than on every refresh, which is roughly once a second.
 
     Second change, forced by the rename: upstream reads its options from a hardcoded section name,
 
@@ -671,6 +674,7 @@ class PiSugar(plugins.Plugin):
         self.voltage_max = 4.25
         self.temp_max = 60
         self.extra_positions = {}  # optional standalone voltage/temp elements
+        self._logged_not_ready = False  # so the not-ready notice is logged once
 
     def safe_get(self, func, default=None):
         """
@@ -900,7 +904,7 @@ class PiSugar(plugins.Plugin):
             LabeledValue(
                 color=BLACK,
                 label="BAT",
-                value="0%",
+                value="-",
                 position=(ui.width() / 2 + 15, 0),
                 label_font=fonts.Bold,
                 text_font=fonts.Medium,
@@ -944,28 +948,38 @@ class PiSugar(plugins.Plugin):
         except Exception as e:
             # Log at debug to avoid clutter since it might be a false positive
             logging.warning(f"[PiSugarX] {e}")
-        if self.ready:
-            capacity = self.safe_get(self.ps.get_battery_level, default=0)
-            voltage = self.safe_get(self.ps.get_battery_voltage, default=0.00)
-            temp = self.safe_get(self.ps.get_temperature, default=0)
+        # A silent I2C bus means there is nothing to report, and a zero reads as an
+        # empty battery instead of a missing one. Say so with a single dash, the same
+        # placeholder the elements are created with, so the top bar does not shift.
+        if not self.ready:
+            ui._state._state['bat'].label = "BAT"
+            ui.set('bat', "-")
+            for key in ('psvoltage', 'pstemp'):
+                if key in ui._state._state:
+                    ui.set(key, "-")
+            # Once per state change, not once per refresh: on_ui_update runs about
+            # every second, and an unpowered PiSugar would fill the journal.
+            if not self._logged_not_ready:
+                logging.info("[PiSugarX] PiSugar is not ready, readings unavailable")
+                self._logged_not_ready = True
+            return
+        self._logged_not_ready = False
 
-        else:
-            capacity = 0
-            voltage = 0.00
-            temp = 0
-            logging.info(f"[PiSugarX] PiSugar is not ready")
+        capacity = self.safe_get(self.ps.get_battery_level, default=0)
+        voltage = self.safe_get(self.ps.get_battery_voltage, default=0.00)
+        temp = self.safe_get(self.ps.get_temperature, default=0)
 
         # Check if battery is plugged in
         battery_plugged = self.safe_get(
             self.ps.get_battery_power_plugged, default=False)
 
-        # The warning marker is suppressed until the device is ready, otherwise the
-        # placeholder 0.00V would read as an alarm for the first few seconds.
+        # Reaching here means the device is ready, so the placeholder values can no
+        # longer be mistaken for a reading and the marker needs no further guard.
         if 'psvoltage' in ui._state._state:
-            alarm = self.ready and not (self.voltage_min <= voltage <= self.voltage_max)
+            alarm = not (self.voltage_min <= voltage <= self.voltage_max)
             ui.set('psvoltage', f"{voltage:.2f}V{'!' if alarm else ''}")
         if 'pstemp' in ui._state._state:
-            alarm = self.ready and temp >= self.temp_max
+            alarm = temp >= self.temp_max
             ui.set('pstemp', f"{temp}C{'!' if alarm else ''}")
 
         # The MCU has no 'charge complete' bit, only 'external power present', so
