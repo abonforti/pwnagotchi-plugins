@@ -11,6 +11,7 @@ Raspberry Pi Zero 2 W with a Waveshare 2.13" v3 display, 250x122, and a PiSugar 
 | [`pisugarx_ext.py`](pisugarx_ext.py) | Fork of the bundled `pisugarx`: `BAT` / `CHG` / `EXT` instead of `CHG` at any charge, standalone voltage and temperature with an out of range marker, two upstream fixes |
 | [`age_caps.py`](age_caps.py) | Fork of AlienMajik's `age`: uppercase labels, `EXP` instead of `Next Age`, three upstream fixes |
 | [`memtemp_caps.py`](memtemp_caps.py) | Fork of the bundled `memtemp`: uppercase headers, heavier fonts |
+| [`gps_caps.py`](gps_caps.py) | Replaces the bundled `gps`: reads gpsd directly instead of going through bettercap, shows a one character status in a single display cell, and saves `.gps.json` beside handshakes |
 | [`pisugar_custom_button.py`](pisugar_custom_button.py) | Long press on the PiSugar custom button switches between AUTO and PASV; single and double are reserved |
 | [`pasv_mode.py`](pasv_mode.py) | A third state between AUTO and MANU: keeps listening, stops deauthenticating, associating and advertising, and survives a restart |
 | [`ui_tweaks.py`](ui_tweaks.py) | Moves and restyles built-in elements, and adds a connectivity indicator with the pwngrid inbox counter |
@@ -60,6 +61,7 @@ would poll the same device and both would draw over each other.
 | `pisugarx_ext` | `pisugarx` |
 | `age_caps` | `age` |
 | `memtemp_caps` | `memtemp` |
+| `gps_caps` | `gps` |
 
 ## Layout
 
