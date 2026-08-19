@@ -70,6 +70,7 @@ class PiSugarServer:
         # Start the device connection in a background thread
         self.connection_thread = threading.Thread(
             target=self._connect_device, daemon=True)
+        self._absence_logged = False
         self.connection_thread.start()
 
     def _connect_device(self):
@@ -90,10 +91,19 @@ class PiSugarServer:
                 self.device_init()
             else:
                 self.model = None
-                logging.info(
-                    "No PiSugar device was found. Please check if the PiSugar device is powered on."
-                )
+                # Il giro di ricerca e' ogni cinque secondi: loggare a ogni
+                # passata riempie il log di 720 righe l'ora quando il PiSugar
+                # e' semplicemente spento, che e' una condizione normale con il
+                # Pi alimentato dal solo USB. Si dice una volta e si tace.
+                if not self._absence_logged:
+                    logging.info(
+                        "No PiSugar device was found. Please check if the PiSugar device is powered on."
+                    )
+                    self._absence_logged = True
+                else:
+                    logging.debug("still no PiSugar device on the I2C bus")
                 time.sleep(5)
+        self._absence_logged = False
         logging.info(f"{self.model} is connected")
         # Once connected, start the timer
         self.start_timer()
@@ -543,7 +553,7 @@ class PiSugarServer:
 
 class PiSugar(plugins.Plugin):
     __author__ = "jayofelony, fork by abonforti"
-    __version__ = "1.6-ext"
+    __version__ = "1.7-ext"
     __license__ = "GPL3"
     __description__ = (
         "A plugin that will add a voltage indicator for the PiSugar batteries. "
